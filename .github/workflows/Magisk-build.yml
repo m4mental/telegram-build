@@ -125,14 +125,14 @@ jobs:
           version=YT v$YT_VER | YTM v$YTM_VER
           versionCode=$(date +%Y%m%d)
           author=Morphe / krvstek
-          description=Systemless YouTube and YouTube Music with default Pitch Black Theme. Works with or without stock apps.
+          description=Systemless YouTube and YouTube Music with default Pitch Black Theme. Specially optimized for Nothing OS and AOSP ROMs.
           EOF
           
           # Copy APKs to the module root temporarily
           cp "$YT_APK" bundle_temp/com.google.android.youtube.apk
           cp "$YTM_APK" bundle_temp/com.google.android.apps.youtube.music.apk
           
-          # Write customize.sh (यह "जादुई जुगाड़" स्क्रिप्ट है जो सब कुछ हैंडल करेगी)
+          # Write customize.sh (Nothing OS विशेष स्क्रिप्ट)
           cat <<'EOF' > bundle_temp/customize.sh
           # Define package names
           YT_PKG="com.google.android.youtube"
@@ -148,65 +148,78 @@ jobs:
               fi
           }
           
-          # 1. Get stock paths BEFORE uninstalling user updates to guarantee detection
-          YT_PATH=""
-          YTM_PATH=""
-          if [ "$BOOTMODE" = "true" ]; then
-              YT_PATH=$(pm path $YT_PKG | head -n 1 | cut -d: -f2)
-              YTM_PATH=$(pm path $YTM_PKG | head -n 1 | cut -d: -f2)
+          # Helper function to find system app directories case-insensitively with high speed
+          find_system_dir() {
+              local name="$1"
+              for path in /product/app /product/priv-app /system/app /system/priv-app /system/product/app /system/product/priv-app /system_ext/app /system_ext/priv-app /vendor/app; do
+                  if [ -d "$path" ]; then
+                      local found
+                      found=$(find "$path" -maxdepth 2 -type d -iname "*$name*" 2>/dev/null | head -n 1)
+                      if [ -n "$found" ]; then
+                          echo "$found"
+                          return
+                      fi
+                  fi
+              done
+          }
+          
+          # 1. Nothing OS के लिए गायब ऐप्स को वर्तमान यूजर (User 0) के लिए फिर से रजिस्टर करना
+          ui_print "- Restoring system packages registry..."
+          cmd package install-existing $YT_PKG >/dev/null 2>&1
+          cmd package install-existing $YTM_PKG >/dev/null 2>&1
+          pm enable $YT_PKG >/dev/null 2>&1
+          pm enable $YTM_PKG >/dev/null 2>&1
+          
+          # 2. स्कैन करके स्टॉक यूट्यूब और स्टॉक म्यूजिक फोल्डर का पता लगाना
+          ui_print "- Scanning Nothing OS partitions for YouTube..."
+          YT_DIR=$(find_system_dir "YouTube")
+          
+          ui_print "- Scanning Nothing OS partitions for YouTube Music..."
+          # Nothing Phone (2a) में यह आमतौर पर 'YouTubeMusicPrebuilt' होता है
+          YTM_DIR=$(find_system_dir "YouTubeMusic")
+          if [ -z "$YTM_DIR" ]; then
+              YTM_DIR=$(find_system_dir "Music2")
           fi
           
-          # 2. Uninstall any existing user updates to prevent signature issues
+          # 3. पुराने यूजर अपडेट्स को हटाना ताकि सिग्नेचर एरर न आए
           ui_print "- Removing conflicting user updates..."
           pm uninstall $YT_PKG >/dev/null 2>&1
           pm uninstall $YTM_PKG >/dev/null 2>&1
           
           # --- YouTube Installation ---
-          if [ "$BOOTMODE" != "true" ]; then
-              # Recovery Mode fall-back
-              ui_print "- Installing YouTube to default system path (Recovery)..."
+          if [ -n "$YT_DIR" ]; then
+              STOCK_FILE=$(ls "$YT_DIR" | grep -i "\.apk$" | head -n 1)
+              if [ -z "$STOCK_FILE" ]; then
+                  STOCK_FILE="YouTube.apk"
+              fi
+              ui_print "- Stock YouTube found at: $YT_DIR ($STOCK_FILE)"
+              MOUNT_DIR=$(get_magisk_mount_path "$YT_DIR")
+              mkdir -p "$MOUNT_DIR"
+              cp "$MODPATH/com.google.android.youtube.apk" "$MOUNT_DIR/$STOCK_FILE"
+              chmod 644 "$MOUNT_DIR/$STOCK_FILE"
+          else
+              ui_print "- Stock YouTube not found. Creating fallback system app..."
               mkdir -p "$MODPATH/system/product/app/YouTube"
               cp "$MODPATH/com.google.android.youtube.apk" "$MODPATH/system/product/app/YouTube/YouTube.apk"
               chmod 644 "$MODPATH/system/product/app/YouTube/YouTube.apk"
-          else
-              if [ -n "$YT_PATH" ]; then
-                  YT_DIR=$(dirname "$YT_PATH")
-                  STOCK_FILE=$(basename "$YT_PATH")
-                  ui_print "- Stock YouTube found at: $YT_DIR ($STOCK_FILE)"
-                  MOUNT_DIR=$(get_magisk_mount_path "$YT_DIR")
-                  mkdir -p "$MOUNT_DIR"
-                  cp "$MODPATH/com.google.android.youtube.apk" "$MOUNT_DIR/$STOCK_FILE"
-                  chmod 644 "$MOUNT_DIR/$STOCK_FILE"
-              else
-                  ui_print "- Stock YouTube not found. Creating new system app..."
-                  mkdir -p "$MODPATH/system/product/app/YouTube"
-                  cp "$MODPATH/com.google.android.youtube.apk" "$MODPATH/system/product/app/YouTube/YouTube.apk"
-                  chmod 644 "$MODPATH/system/product/app/YouTube/YouTube.apk"
-              fi
           fi
           
           # --- YouTube Music Installation ---
-          if [ "$BOOTMODE" != "true" ]; then
-              # Recovery Mode fall-back
-              ui_print "- Installing YT Music to default system path (Recovery)..."
+          if [ -n "$YTM_DIR" ]; then
+              STOCK_FILE=$(ls "$YTM_DIR" | grep -i "\.apk$" | head -n 1)
+              if [ -z "$STOCK_FILE" ]; then
+                  STOCK_FILE="YouTubeMusic.apk"
+              fi
+              ui_print "- Stock YT Music found at: $YTM_DIR ($STOCK_FILE)"
+              MOUNT_DIR=$(get_magisk_mount_path "$YTM_DIR")
+              mkdir -p "$MOUNT_DIR"
+              cp "$MODPATH/com.google.android.apps.youtube.music.apk" "$MOUNT_DIR/$STOCK_FILE"
+              chmod 644 "$MOUNT_DIR/$STOCK_FILE"
+          else
+              ui_print "- Stock YT Music not found. Creating fallback system app..."
               mkdir -p "$MODPATH/system/product/app/YouTubeMusic"
               cp "$MODPATH/com.google.android.apps.youtube.music.apk" "$MODPATH/system/product/app/YouTubeMusic/YouTubeMusic.apk"
               chmod 644 "$MODPATH/system/product/app/YouTubeMusic/YouTubeMusic.apk"
-          else
-              if [ -n "$YTM_PATH" ]; then
-                  YTM_DIR=$(dirname "$YTM_PATH")
-                  STOCK_FILE=$(basename "$YTM_PATH")
-                  ui_print "- Stock YT Music found at: $YTM_DIR ($STOCK_FILE)"
-                  MOUNT_DIR=$(get_magisk_mount_path "$YTM_DIR")
-                  mkdir -p "$MOUNT_DIR"
-                  cp "$MODPATH/com.google.android.apps.youtube.music.apk" "$MOUNT_DIR/$STOCK_FILE"
-                  chmod 644 "$MOUNT_DIR/$STOCK_FILE"
-              else
-                  ui_print "- Stock YT Music not found. Creating new system app..."
-                  mkdir -p "$MODPATH/system/product/app/YouTubeMusic"
-                  cp "$MODPATH/com.google.android.apps.youtube.music.apk" "$MODPATH/system/product/app/YouTubeMusic/YouTubeMusic.apk"
-                  chmod 644 "$MODPATH/system/product/app/YouTubeMusic/YouTubeMusic.apk"
-              fi
           fi
           
           # Clean up temporary APKs from root
