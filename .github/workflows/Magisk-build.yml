@@ -16,7 +16,7 @@ jobs:
         with:
           repository: 'krvstek/uni-apks'
 
-      # Morphe CLI के लिए Java 21 सेटअप करेगा (इससे Java 17 का एरर ठीक हो जाएगा)
+      # Morphe CLI के लिए Java 21 सेटअप करेगा
       - name: Set up Java 21
         uses: actions/setup-java@v4
         with:
@@ -42,33 +42,53 @@ jobs:
           with open("config.toml", "rb") as f:
               config = tomllib.load(f)
           
-          # Keep only essential configs and youtube/youtube-music to save build time
-          allowed_keys = ["brand", "patches-source", "patches-version", "cli-source", "cli-version", "youtube", "youtube-music"]
+          # Initialize new config with global settings
+          allowed_global_keys = ["brand", "patches-source", "patches-version", "cli-source", "cli-version"]
           new_config = {k: v for k, v in config.items() if k in allowed_keys}
           
-          # Configure apps for Magisk & Pitch Black Theme
-          for app_name in ["youtube", "youtube-music"]:
-              if app_name in new_config:
-                  # Enable the app
-                  new_config[app_name]["enabled"] = True
-                  
-                  # Exclude GmsCore support (microg) since it's a root build
-                  exclude_list = new_config[app_name].get("exclude-patches", [])
-                  if "GmsCore support" not in exclude_list:
-                      exclude_list.append("GmsCore support")
-                  new_config[app_name]["exclude-patches"] = exclude_list
-                  
-                  # Force Pitch Black Theme parameter
-                  existing_args = new_config[app_name].get("patcher-args", "")
-                  pitch_black_arg = "-O darkThemeBackgroundColor=@android:color/black"
-                  if pitch_black_arg not in existing_args:
-                      new_config[app_name]["patcher-args"] = f"{existing_args} {pitch_black_arg}".strip()
+          # Dynamically search for youtube & youtube-music keys (ignoring case)
+          for key, value in config.items():
+              if isinstance(value, dict):
+                  lower_key = key.lower()
+                  # YouTube check (but not youtube-music)
+                  if "youtube" in lower_key and "music" not in lower_key:
+                      new_config[key] = value
+                      new_config[key]["enabled"] = True
+                      
+                      # Exclude GmsCore support (microg) since it's a root build
+                      exclude_list = new_config[key].get("exclude-patches", [])
+                      if "GmsCore support" not in exclude_list:
+                          exclude_list.append("GmsCore support")
+                      new_config[key]["exclude-patches"] = exclude_list
+                      
+                      # Force Pitch Black Theme parameter
+                      existing_args = new_config[key].get("patcher-args", "")
+                      pitch_black_arg = "-O darkThemeBackgroundColor=@android:color/black"
+                      if pitch_black_arg not in existing_args:
+                          new_config[key]["patcher-args"] = f"{existing_args} {pitch_black_arg}".strip()
+                          
+                  # YouTube Music check
+                  elif "youtube" in lower_key and "music" in lower_key:
+                      new_config[key] = value
+                      new_config[key]["enabled"] = True
+                      
+                      # Exclude GmsCore support
+                      exclude_list = new_config[key].get("exclude-patches", [])
+                      if "GmsCore support" not in exclude_list:
+                          exclude_list.append("GmsCore support")
+                      new_config[key]["exclude-patches"] = exclude_list
+                      
+                      # Force Pitch Black Theme parameter
+                      existing_args = new_config[key].get("patcher-args", "")
+                      pitch_black_arg = "-O darkThemeBackgroundColor=@android:color/black"
+                      if pitch_black_arg not in existing_args:
+                          new_config[key]["patcher-args"] = f"{existing_args} {pitch_black_arg}".strip()
           
           # Save back modified config
           with open("config.toml", "wb") as f:
               tomli_w.dump(new_config, f)
           
-          print("Modified config.toml successfully for Magisk Modules and Pitch Black Theme!")
+          print("Modified config.toml successfully with Dynamic Keys and Pitch Black Theme!")
 
       - name: Install UV (Python Package Manager used by uni-apks)
         uses: astral-sh/setup-uv@v3
