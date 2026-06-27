@@ -132,7 +132,7 @@ jobs:
           cp "$YT_APK" bundle_temp/com.google.android.youtube.apk
           cp "$YTM_APK" bundle_temp/com.google.android.apps.youtube.music.apk
           
-          # Write customize.sh (Nothing OS विशेष स्क्रिप्ट)
+          # Write customize.sh (Nothing OS विशेष शेल-ओनली स्क्रिप्ट)
           cat <<'EOF' > bundle_temp/customize.sh
           # Define package names
           YT_PKG="com.google.android.youtube"
@@ -148,22 +148,27 @@ jobs:
               fi
           }
           
-          # Helper function to find system app directories case-insensitively with high speed
+          # 100% Pure Shell Function to find system app directories without using 'find'
           find_system_dir() {
               local name="$1"
-              for path in /product/app /product/priv-app /system/app /system/priv-app /system/product/app /system/product/priv-app /system_ext/app /system_ext/priv-app /vendor/app; do
-                  if [ -d "$path" ]; then
-                      local found
-                      found=$(find "$path" -maxdepth 2 -type d -iname "*$name*" 2>/dev/null | head -n 1)
-                      if [ -n "$found" ]; then
-                          echo "$found"
-                          return
-                      fi
+              local lower_name=$(echo "$name" | tr '[:upper:]' '[:lower:]')
+              for parent in /product/app /product/priv-app /system/app /system/priv-app /system/product/app /system/product/priv-app /system_ext/app /system_ext/priv-app /vendor/app; do
+                  if [ -d "$parent" ]; then
+                      for dir in "$parent"/*; do
+                          if [ -d "$dir" ]; then
+                              local base_dir=$(basename "$dir")
+                              local lower_dir=$(echo "$base_dir" | tr '[:upper:]' '[:lower:]')
+                              if [[ "$lower_dir" == *"$lower_name"* ]]; then
+                                  echo "$dir"
+                                  return
+                              fi
+                          fi
+                      done
                   fi
               done
           }
           
-          # 1. Nothing OS के लिए गायब ऐप्स को वर्तमान यूजर (User 0) के लिए फिर से रजिस्टर करना
+          # 1. Nothing Phone (2a) के लिए गायब ऐप्स को वर्तमान यूजर (User 0) के लिए फिर से रजिस्टर करना
           ui_print "- Restoring system packages registry..."
           cmd package install-existing $YT_PKG >/dev/null 2>&1
           cmd package install-existing $YTM_PKG >/dev/null 2>&1
@@ -175,7 +180,6 @@ jobs:
           YT_DIR=$(find_system_dir "YouTube")
           
           ui_print "- Scanning Nothing OS partitions for YouTube Music..."
-          # Nothing Phone (2a) में यह आमतौर पर 'YouTubeMusicPrebuilt' होता है
           YTM_DIR=$(find_system_dir "YouTubeMusic")
           if [ -z "$YTM_DIR" ]; then
               YTM_DIR=$(find_system_dir "Music2")
@@ -188,10 +192,18 @@ jobs:
           
           # --- YouTube Installation ---
           if [ -n "$YT_DIR" ]; then
-              STOCK_FILE=$(ls "$YT_DIR" | grep -i "\.apk$" | head -n 1)
+              # Pure shell to find original apk name without 'ls' or 'grep'
+              STOCK_FILE=""
+              for file in "$YT_DIR"/*; do
+                  if [[ "$file" == *.apk || "$file" == *.APK ]]; then
+                      STOCK_FILE=$(basename "$file")
+                      break
+                  fi
+              done
               if [ -z "$STOCK_FILE" ]; then
                   STOCK_FILE="YouTube.apk"
               fi
+              
               ui_print "- Stock YouTube found at: $YT_DIR ($STOCK_FILE)"
               MOUNT_DIR=$(get_magisk_mount_path "$YT_DIR")
               mkdir -p "$MOUNT_DIR"
@@ -206,10 +218,17 @@ jobs:
           
           # --- YouTube Music Installation ---
           if [ -n "$YTM_DIR" ]; then
-              STOCK_FILE=$(ls "$YTM_DIR" | grep -i "\.apk$" | head -n 1)
+              STOCK_FILE=""
+              for file in "$YTM_DIR"/*; do
+                  if [[ "$file" == *.apk || "$file" == *.APK ]]; then
+                      STOCK_FILE=$(basename "$file")
+                      break
+                  fi
+              done
               if [ -z "$STOCK_FILE" ]; then
                   STOCK_FILE="YouTubeMusic.apk"
               fi
+              
               ui_print "- Stock YT Music found at: $YTM_DIR ($STOCK_FILE)"
               MOUNT_DIR=$(get_magisk_mount_path "$YTM_DIR")
               mkdir -p "$MOUNT_DIR"
