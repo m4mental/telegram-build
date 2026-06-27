@@ -97,89 +97,128 @@ jobs:
         run: |
           uv run main.py
 
-      - name: Build Magisk Module ZIPs
+      - name: Build Unified Magisk Module ZIP
         run: |
           # Create build directory for magisk
           mkdir -p magisk_out
           
-          # Clone the official Magisk module template by j-hc
-          git clone --depth=1 https://github.com/j-hc/revanced-magisk-module.git jhc-template
-          
-          # --- YouTube Module Packaging ---
+          # Check if compiled APKs exist
           YT_APK=$(find build -iname "*youtube*.apk" ! -iname "*music*" | head -n 1)
-          if [ -n "$YT_APK" ]; then
-            echo "Found YouTube APK: $YT_APK"
-            YT_VER=$(echo "$YT_APK" | grep -oP 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/v//' || echo "1.0.0")
-            
-            mkdir -p yt_temp
-            cp -r jhc-template/module/* yt_temp/
-            cp "$YT_APK" yt_temp/com.google.android.youtube.apk
-            
-            # Write module.prop
-            cat <<EOF > yt_temp/module.prop
-          id=youtube-morphe-magisk
-          name=YouTube Morphe
-          version=v$YT_VER
-          versionCode=$(date +%Y%m%d)
-          author=Morphe / krvstek
-          description=YouTube patched with Morphe patches (Magisk/KernelSU). Pitch Black theme is enabled by default.
-          EOF
-          
-            # Write config
-            echo -e "PKG_NAME=com.google.android.youtube\nPKG_VER=$YT_VER\nMODULE_ARCH=arm64" > yt_temp/config
-            
-            # Zip module
-            cd yt_temp
-            zip -r ../magisk_out/youtube-morphe-magisk-v$YT_VER.zip .
-            cd ..
-          else
-            echo "YouTube APK not found in build/ folder!"
-          fi
-          
-          # --- YouTube Music Module Packaging ---
           YTM_APK=$(find build -iname "*music*.apk" -o -iname "*youtube-music*.apk" | head -n 1)
-          if [ -n "$YTM_APK" ]; then
-            echo "Found YouTube Music APK: $YTM_APK"
-            YTM_VER=$(echo "$YTM_APK" | grep -oP 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/v//' || echo "1.0.0")
-            
-            mkdir -p ytm_temp
-            cp -r jhc-template/module/* ytm_temp/
-            cp "$YTM_APK" ytm_temp/com.google.android.apps.youtube.music.apk
-            
-            # Write module.prop
-            cat <<EOF > ytm_temp/module.prop
-          id=ytm-morphe-magisk
-          name=YouTube Music Morphe
-          version=v$YTM_VER
+          
+          if [ -z "$YT_APK" ] || [ -z "$YTM_APK" ]; then
+            echo "Error: One of the required APKs was not compiled!"
+            exit 1
+          fi
+          
+          # Extract versions
+          YT_VER=$(echo "$YT_APK" | grep -oP 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/v//' || echo "1.0.0")
+          YTM_VER=$(echo "$YTM_APK" | grep -oP 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/v//' || echo "1.0.0")
+          
+          # Setup single unified module folder
+          mkdir -p bundle_temp
+          
+          # Write module.prop (Unified details)
+          cat <<EOF > bundle_temp/module.prop
+          id=youtube-music-morphe-bundle
+          name=YouTube & YT Music Morphe Bundle
+          version=YT v$YT_VER | YTM v$YTM_VER
           versionCode=$(date +%Y%m%d)
           author=Morphe / krvstek
-          description=YouTube Music patched with Morphe patches (Magisk/KernelSU). Pitch Black theme is enabled by default.
+          description=Systemless YouTube and YouTube Music with default Pitch Black Theme. Automatically handles installation/downgrade. Works with or without stock apps.
           EOF
           
-            # Write config
-            echo -e "PKG_NAME=com.google.android.apps.youtube.music\nPKG_VER=$YTM_VER\nMODULE_ARCH=arm64" > ytm_temp/config
-            
-            # Zip module
-            cd ytm_temp
-            zip -r ../magisk_out/youtube-music-morphe-magisk-v$YTM_VER.zip .
-            cd ..
+          # Copy APKs to the module root temporarily
+          cp "$YT_APK" bundle_temp/com.google.android.youtube.apk
+          cp "$YTM_APK" bundle_temp/com.google.android.apps.youtube.music.apk
+          
+          # Write customize.sh (यह "जादुई जुगाड़" स्क्रिप्ट है जो सब कुछ हैंडल करेगी)
+          cat <<'EOF' > bundle_temp/customize.sh
+          # Define package names
+          YT_PKG="com.google.android.youtube"
+          YTM_PKG="com.google.android.apps.youtube.music"
+          
+          # Helper function to map device paths to Magisk system paths
+          get_magisk_mount_path() {
+              local target_dir="$1"
+              if [[ "$target_dir" == /system/* ]]; then
+                  echo "$MODPATH$target_dir"
+              else
+                  echo "$MODPATH/system$target_dir"
+              fi
+          }
+          
+          # 1. Uninstall any existing user updates to prevent signature issues
+          ui_print "- Removing conflicting user updates..."
+          pm uninstall $YT_PKG >/dev/null 2>&1
+          pm uninstall $YTM_PKG >/dev/null 2>&1
+          
+          # --- YouTube Installation ---
+          if [ "$BOOTMODE" != "true" ]; then
+              # Recovery Mode fall-back
+              ui_print "- Installing YouTube to default system path (Recovery)..."
+              mkdir -p "$MODPATH/system/product/app/YouTube"
+              cp "$MODPATH/com.google.android.youtube.apk" "$MODPATH/system/product/app/YouTube/YouTube.apk"
           else
-            echo "YouTube Music APK not found in build/ folder!"
+              YT_PATH=$(pm path $YT_PKG | head -n 1 | cut -d: -f2)
+              if [ -n "$YT_PATH" ]; then
+                  YT_DIR=$(dirname "$YT_PATH")
+                  ui_print "- Stock YouTube found at: $YT_DIR"
+                  MOUNT_DIR=$(get_magisk_mount_path "$YT_DIR")
+                  mkdir -p "$MOUNT_DIR"
+                  cp "$MODPATH/com.google.android.youtube.apk" "$MOUNT_DIR/base.apk"
+              else
+                  ui_print "- Stock YouTube not found. Creating new system app..."
+                  mkdir -p "$MODPATH/system/product/app/YouTube"
+                  cp "$MODPATH/com.google.android.youtube.apk" "$MODPATH/system/product/app/YouTube/YouTube.apk"
+              fi
           fi
-
+          
+          # --- YouTube Music Installation ---
+          if [ "$BOOTMODE" != "true" ]; then
+              # Recovery Mode fall-back
+              ui_print "- Installing YT Music to default system path (Recovery)..."
+              mkdir -p "$MODPATH/system/product/app/YouTubeMusic"
+              cp "$MODPATH/com.google.android.apps.youtube.music.apk" "$MODPATH/system/product/app/YouTubeMusic/YouTubeMusic.apk"
+          else
+              YTM_PATH=$(pm path $YTM_PKG | head -n 1 | cut -d: -f2)
+              if [ -n "$YTM_PATH" ]; then
+                  YTM_DIR=$(dirname "$YTM_PATH")
+                  ui_print "- Stock YT Music found at: $YTM_DIR"
+                  MOUNT_DIR=$(get_magisk_mount_path "$YTM_DIR")
+                  mkdir -p "$MOUNT_DIR"
+                  cp "$MODPATH/com.google.android.apps.youtube.music.apk" "$MOUNT_DIR/base.apk"
+              else
+                  ui_print "- Stock YT Music not found. Creating new system app..."
+                  mkdir -p "$MODPATH/system/product/app/YouTubeMusic"
+                  cp "$MODPATH/com.google.android.apps.youtube.music.apk" "$MODPATH/system/product/app/YouTubeMusic/YouTubeMusic.apk"
+              fi
+          fi
+          
+          # Clean up temporary APKs from root
+          rm -f "$MODPATH/com.google.android.youtube.apk"
+          rm -f "$MODPATH/com.google.android.apps.youtube.music.apk"
+          ui_print "- Package cleanup complete!"
+          EOF
+          
+          # Create ZIP of the entire bundle
+          cd bundle_temp
+          zip -r ../magisk_out/YouTube-Music-Morphe-Bundle.zip .
+          cd ..
+          
       - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v2
         if: always()
         with:
           tag_name: "morphe-magisk-${{ github.run_number }}"
-          name: "YouTube & YT Music Morphe Magisk Module"
+          name: "YouTube & YT Music Morphe Magisk Module Bundle"
           body: |
-            Automated Magisk/KernelSU Modules build using Morphe patches.
+            Unified Magisk/KernelSU Module for YouTube & YT Music.
             
-            - Built on: ${{ github.event.repository.updated_at }}
-            - Base toolchain: krvstek/uni-apks & j-hc template
-            - Theme: Default Pitch Black Theme enabled.
+            - Automatically uninstalls play store updates during flash to avoid signature issues.
+            - Automatically installs apps as system apps if they are missing.
+            - Default Theme: Pitch Black Theme enabled.
           files: |
-            magisk_out/*.zip
+            magisk_out/YouTube-Music-Morphe-Bundle.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
