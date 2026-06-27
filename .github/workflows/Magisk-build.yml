@@ -44,7 +44,7 @@ jobs:
           
           # Initialize new config with global settings
           allowed_global_keys = ["brand", "patches-source", "patches-version", "cli-source", "cli-version"]
-          new_config = {k: v for k, v in config.items() if k in allowed_keys}
+          new_config = {k: v for k, v in config.items() if k in allowed_global_keys} # Variable name corrected here
           
           # Dynamically search for youtube & youtube-music keys (ignoring case)
           for key, value in config.items():
