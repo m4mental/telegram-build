@@ -1,0 +1,149 @@
+name: Build Magisk Modules
+
+on:
+  workflow_dispatch: # इसे आप मैन्युअली एक बटन क्लिक करके रन कर सकते हैं
+
+permissions:
+  contents: write
+
+jobs:
+  build-modules:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies for configuration
+        run: |
+          pip install tomli-w
+
+      - name: Configure config.toml for Magisk
+        shell: python
+        run: |
+          import tomllib
+          import tomli_w
+          
+          # Load existing config
+          with open("config.toml", "rb") as f:
+              config = tomllib.load(f)
+          
+          # Keep only essential configs and youtube/youtube-music to save build time
+          allowed_keys = ["brand", "patches-source", "patches-version", "cli-source", "cli-version", "youtube", "youtube-music"]
+          new_config = {k: v for k, v in config.items() if k in allowed_keys}
+          
+          # Configure apps for Magisk
+          for app_name in ["youtube", "youtube-music"]:
+              if app_name in new_config:
+                  # Enable the app
+                  new_config[app_name]["enabled"] = True
+                  
+                  # Exclude GmsCore support (microg) since it's a root build
+                  exclude_list = new_config[app_name].get("exclude-patches", [])
+                  if "GmsCore support" not in exclude_list:
+                      exclude_list.append("GmsCore support")
+                  new_config[app_name]["exclude-patches"] = exclude_list
+          
+          # Save back modified config
+          with open("config.toml", "wb") as f:
+              tomli_w.dump(new_config, f)
+          
+          print("Modified config.toml successfully for Magisk Modules!")
+
+      - name: Install UV (Python Package Manager used by uni-apks)
+        uses: astral-sh/setup-uv@v3
+
+      - name: Run Patcher Script
+        run: |
+          uv run main.py
+
+      - name: Build Magisk Module ZIPs
+        run: |
+          # Create build directory for magisk
+          mkdir -p magisk_out
+          
+          # Clone the official Magisk module template by j-hc
+          git clone --depth=1 https://github.com/j-hc/revanced-magisk-module.git jhc-template
+          
+          # --- YouTube Module Packaging ---
+          YT_APK=$(find build -iname "*youtube*.apk" ! -iname "*music*" | head -n 1)
+          if [ -n "$YT_APK" ]; then
+            echo "Found YouTube APK: $YT_APK"
+            YT_VER=$(echo "$YT_APK" | grep -oP 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/v//' || echo "1.0.0")
+            
+            mkdir -p yt_temp
+            cp -r jhc-template/module/* yt_temp/
+            cp "$YT_APK" yt_temp/com.google.android.youtube.apk
+            
+            # Write module.prop
+            cat <<EOF > yt_temp/module.prop
+          id=youtube-morphe-magisk
+          name=YouTube Morphe
+          version=v$YT_VER
+          versionCode=$(date +%Y%m%d)
+          author=Morphe / krvstek
+          description=YouTube patched with Morphe patches (Magisk/KernelSU).
+          EOF
+          
+            # Write config
+            echo -e "PKG_NAME=com.google.android.youtube\nPKG_VER=$YT_VER\nMODULE_ARCH=arm64" > yt_temp/config
+            
+            # Zip module
+            cd yt_temp
+            zip -r ../magisk_out/youtube-morphe-magisk-v$YT_VER.zip .
+            cd ..
+          else
+            echo "YouTube APK not found in build/ folder!"
+          fi
+          
+          # --- YouTube Music Module Packaging ---
+          YTM_APK=$(find build -iname "*music*.apk" | head -n 1)
+          if [ -n "$YTM_APK" ]; then
+            echo "Found YouTube Music APK: $YTM_APK"
+            YTM_VER=$(echo "$YTM_APK" | grep -oP 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/v//' || echo "1.0.0")
+            
+            mkdir -p ytm_temp
+            cp -r jhc-template/module/* ytm_temp/
+            cp "$YTM_APK" ytm_temp/com.google.android.apps.youtube.music.apk
+            
+            # Write module.prop
+            cat <<EOF > ytm_temp/module.prop
+          id=ytm-morphe-magisk
+          name=YouTube Music Morphe
+          version=v$YTM_VER
+          versionCode=$(date +%Y%m%d)
+          author=Morphe / krvstek
+          description=YouTube Music patched with Morphe patches (Magisk/KernelSU).
+          EOF
+          
+            # Write config
+            echo -e "PKG_NAME=com.google.android.apps.youtube.music\nPKG_VER=$YTM_VER\nMODULE_ARCH=arm64" > ytm_temp/config
+            
+            # Zip module
+            cd ytm_temp
+            zip -r ../magisk_out/youtube-music-morphe-magisk-v$YTM_VER.zip .
+            cd ..
+          else
+            echo "YouTube Music APK not found in build/ folder!"
+          fi
+
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        if: always()
+        with:
+          tag_name: "morphe-magisk-${{ github.run_number }}"
+          name: "YouTube & YT Music Morphe Magisk Module"
+          body: |
+            Automated Magisk/KernelSU Modules build using Morphe patches.
+            
+            - Built on: ${{ github.event.repository.updated_at }}
+            - Base toolchain: krvstek/uni-apks & j-hc template
+          files: |
+            magisk_out/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
