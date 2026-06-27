@@ -1,7 +1,7 @@
 name: Build Magisk Modules
 
 on:
-  workflow_dispatch: # इसे आप मैन्युअली एक बटन क्लिक करके रन कर सकते हैं
+  workflow_dispatch: # इसे आप मैन्युअली रन कर सकते हैं
 
 permissions:
   contents: write
@@ -44,13 +44,13 @@ jobs:
           
           # Initialize new config with global settings
           allowed_global_keys = ["brand", "patches-source", "patches-version", "cli-source", "cli-version"]
-          new_config = {k: v for k, v in config.items() if k in allowed_global_keys} # Variable name corrected here
+          new_config = {k: v for k, v in config.items() if k in allowed_global_keys}
           
           # Dynamically search for youtube & youtube-music keys (ignoring case)
           for key, value in config.items():
               if isinstance(value, dict):
                   lower_key = key.lower()
-                  # YouTube check (but not youtube-music)
+                  # YouTube check (must contain youtube but not music)
                   if "youtube" in lower_key and "music" not in lower_key:
                       new_config[key] = value
                       new_config[key]["enabled"] = True
@@ -67,8 +67,8 @@ jobs:
                       if pitch_black_arg not in existing_args:
                           new_config[key]["patcher-args"] = f"{existing_args} {pitch_black_arg}".strip()
                           
-                  # YouTube Music check
-                  elif "youtube" in lower_key and "music" in lower_key:
+                  # YouTube Music check (matches 'Music', 'YouTube Music', 'YouTube-Music', etc.)
+                  elif "music" in lower_key:
                       new_config[key] = value
                       new_config[key]["enabled"] = True
                       
@@ -137,7 +137,7 @@ jobs:
           fi
           
           # --- YouTube Music Module Packaging ---
-          YTM_APK=$(find build -iname "*music*.apk" | head -n 1)
+          YTM_APK=$(find build -iname "*music*.apk" -o -iname "*youtube-music*.apk" | head -n 1)
           if [ -n "$YTM_APK" ]; then
             echo "Found YouTube Music APK: $YTM_APK"
             YTM_VER=$(echo "$YTM_APK" | grep -oP 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/v//' || echo "1.0.0")
