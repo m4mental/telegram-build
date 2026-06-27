@@ -10,11 +10,18 @@ jobs:
   build-modules:
     runs-on: ubuntu-latest
     steps:
-      # आपके टेलीग्राम-बिल्ड रिपो के बजाय सीधे uni-apks का मुख्य कोड चेकआउट करेगा
+      # सीधे uni-apks का मुख्य कोड चेकआउट करेगा
       - name: Checkout uni-apks Repository
         uses: actions/checkout@v4
         with:
           repository: 'krvstek/uni-apks'
+
+      # Morphe CLI के लिए Java 21 सेटअप करेगा (इससे Java 17 का एरर ठीक हो जाएगा)
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '21'
 
       - name: Set up Python
         uses: actions/setup-python@v5
