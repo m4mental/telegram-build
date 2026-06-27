@@ -125,7 +125,7 @@ jobs:
           version=YT v$YT_VER | YTM v$YTM_VER
           versionCode=$(date +%Y%m%d)
           author=Morphe / krvstek
-          description=Systemless YouTube and YouTube Music with default Pitch Black Theme. Automatically handles installation/downgrade. Works with or without stock apps.
+          description=Systemless YouTube and YouTube Music with default Pitch Black Theme. Works with or without stock apps.
           EOF
           
           # Copy APKs to the module root temporarily
@@ -148,7 +148,15 @@ jobs:
               fi
           }
           
-          # 1. Uninstall any existing user updates to prevent signature issues
+          # 1. Get stock paths BEFORE uninstalling user updates to guarantee detection
+          YT_PATH=""
+          YTM_PATH=""
+          if [ "$BOOTMODE" = "true" ]; then
+              YT_PATH=$(pm path $YT_PKG | head -n 1 | cut -d: -f2)
+              YTM_PATH=$(pm path $YTM_PKG | head -n 1 | cut -d: -f2)
+          fi
+          
+          # 2. Uninstall any existing user updates to prevent signature issues
           ui_print "- Removing conflicting user updates..."
           pm uninstall $YT_PKG >/dev/null 2>&1
           pm uninstall $YTM_PKG >/dev/null 2>&1
@@ -159,18 +167,21 @@ jobs:
               ui_print "- Installing YouTube to default system path (Recovery)..."
               mkdir -p "$MODPATH/system/product/app/YouTube"
               cp "$MODPATH/com.google.android.youtube.apk" "$MODPATH/system/product/app/YouTube/YouTube.apk"
+              chmod 644 "$MODPATH/system/product/app/YouTube/YouTube.apk"
           else
-              YT_PATH=$(pm path $YT_PKG | head -n 1 | cut -d: -f2)
               if [ -n "$YT_PATH" ]; then
                   YT_DIR=$(dirname "$YT_PATH")
-                  ui_print "- Stock YouTube found at: $YT_DIR"
+                  STOCK_FILE=$(basename "$YT_PATH")
+                  ui_print "- Stock YouTube found at: $YT_DIR ($STOCK_FILE)"
                   MOUNT_DIR=$(get_magisk_mount_path "$YT_DIR")
                   mkdir -p "$MOUNT_DIR"
-                  cp "$MODPATH/com.google.android.youtube.apk" "$MOUNT_DIR/base.apk"
+                  cp "$MODPATH/com.google.android.youtube.apk" "$MOUNT_DIR/$STOCK_FILE"
+                  chmod 644 "$MOUNT_DIR/$STOCK_FILE"
               else
                   ui_print "- Stock YouTube not found. Creating new system app..."
                   mkdir -p "$MODPATH/system/product/app/YouTube"
                   cp "$MODPATH/com.google.android.youtube.apk" "$MODPATH/system/product/app/YouTube/YouTube.apk"
+                  chmod 644 "$MODPATH/system/product/app/YouTube/YouTube.apk"
               fi
           fi
           
@@ -180,18 +191,21 @@ jobs:
               ui_print "- Installing YT Music to default system path (Recovery)..."
               mkdir -p "$MODPATH/system/product/app/YouTubeMusic"
               cp "$MODPATH/com.google.android.apps.youtube.music.apk" "$MODPATH/system/product/app/YouTubeMusic/YouTubeMusic.apk"
+              chmod 644 "$MODPATH/system/product/app/YouTubeMusic/YouTubeMusic.apk"
           else
-              YTM_PATH=$(pm path $YTM_PKG | head -n 1 | cut -d: -f2)
               if [ -n "$YTM_PATH" ]; then
                   YTM_DIR=$(dirname "$YTM_PATH")
-                  ui_print "- Stock YT Music found at: $YTM_DIR"
+                  STOCK_FILE=$(basename "$YTM_PATH")
+                  ui_print "- Stock YT Music found at: $YTM_DIR ($STOCK_FILE)"
                   MOUNT_DIR=$(get_magisk_mount_path "$YTM_DIR")
                   mkdir -p "$MOUNT_DIR"
-                  cp "$MODPATH/com.google.android.apps.youtube.music.apk" "$MOUNT_DIR/base.apk"
+                  cp "$MODPATH/com.google.android.apps.youtube.music.apk" "$MOUNT_DIR/$STOCK_FILE"
+                  chmod 644 "$MOUNT_DIR/$STOCK_FILE"
               else
                   ui_print "- Stock YT Music not found. Creating new system app..."
                   mkdir -p "$MODPATH/system/product/app/YouTubeMusic"
                   cp "$MODPATH/com.google.android.apps.youtube.music.apk" "$MODPATH/system/product/app/YouTubeMusic/YouTubeMusic.apk"
+                  chmod 644 "$MODPATH/system/product/app/YouTubeMusic/YouTubeMusic.apk"
               fi
           fi
           
@@ -215,8 +229,8 @@ jobs:
           body: |
             Unified Magisk/KernelSU Module for YouTube & YT Music.
             
-            - Automatically uninstalls play store updates during flash to avoid signature issues.
-            - Automatically installs apps as system apps if they are missing.
+            - Safely uninstalls user-space updates during flash to prevent signature mismatch.
+            - Automatically detects original system paths and preserves identical filenames.
             - Default Theme: Pitch Black Theme enabled.
           files: |
             magisk_out/YouTube-Music-Morphe-Bundle.zip
