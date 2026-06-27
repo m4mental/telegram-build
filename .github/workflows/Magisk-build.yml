@@ -125,126 +125,55 @@ jobs:
           version=YT v$YT_VER | YTM v$YTM_VER
           versionCode=$(date +%Y%m%d)
           author=Morphe / krvstek
-          description=Systemless YouTube and YouTube Music with default Pitch Black Theme. Specially optimized for Nothing OS and AOSP ROMs.
+          description=Systemless dynamic bind-mount for YouTube and YouTube Music with Pitch Black Theme. Completely safe, leaves stock apps untouched on uninstall.
           EOF
           
           # Copy APKs to the module root temporarily
           cp "$YT_APK" bundle_temp/com.google.android.youtube.apk
           cp "$YTM_APK" bundle_temp/com.google.android.apps.youtube.music.apk
           
-          # Write customize.sh (Nothing OS विशेष शेल-ओनली स्क्रिप्ट)
+          # Write customize.sh (सिर्फ फाइलों को व्यवस्थित करेगा, सिस्टम में छेड़छाड़ नहीं करेगा)
           cat <<'EOF' > bundle_temp/customize.sh
+          # Set execute permissions for service.sh
+          chmod 755 "$MODPATH/service.sh"
+          
+          # Move the APKs to safe names inside the module directory
+          mv "$MODPATH/com.google.android.youtube.apk" "$MODPATH/youtube.apk"
+          mv "$MODPATH/com.google.android.apps.youtube.music.apk" "$MODPATH/music.apk"
+          
+          ui_print "- Module prepared successfully!"
+          ui_print "- No system apps were modified or uninstalled."
+          ui_print "- Reboot to dynamically apply the patches!"
+          EOF
+          
+          # Write service.sh (यह स्क्रिप्ट फोन चालू होने के बाद "ऊपर से पैच" लगाएगी)
+          cat <<'EOF' > bundle_temp/service.sh
+          #!/system/bin/sh
+          # Wait for boot to complete fully
+          while [ "$(getprop sys.boot_completed)" != "1" ]; do
+              sleep 1
+          done
+          
+          # Extra wait to ensure Package Manager is ready
+          sleep 5
+          
           # Define package names
           YT_PKG="com.google.android.youtube"
           YTM_PKG="com.google.android.apps.youtube.music"
           
-          # Helper function to map device paths to Magisk system paths
-          get_magisk_mount_path() {
-              local target_dir="$1"
-              if [[ "$target_dir" == /system/* ]]; then
-                  echo "$MODPATH$target_dir"
-              else
-                  echo "$MODPATH/system$target_dir"
-              fi
-          }
+          # Dynamically get stock paths after boot
+          YT_PATH=$(pm path $YT_PKG | head -n 1 | cut -d: -f2)
+          YTM_PATH=$(pm path $YTM_PKG | head -n 1 | cut -d: -f2)
           
-          # 100% Pure Shell Function to find system app directories without using 'find'
-          find_system_dir() {
-              local name="$1"
-              local lower_name=$(echo "$name" | tr '[:upper:]' '[:lower:]')
-              for parent in /product/app /product/priv-app /system/app /system/priv-app /system/product/app /system/product/priv-app /system_ext/app /system_ext/priv-app /vendor/app; do
-                  if [ -d "$parent" ]; then
-                      for dir in "$parent"/*; do
-                          if [ -d "$dir" ]; then
-                              local base_dir=$(basename "$dir")
-                              local lower_dir=$(echo "$base_dir" | tr '[:upper:]' '[:lower:]')
-                              if [[ "$lower_dir" == *"$lower_name"* ]]; then
-                                  echo "$dir"
-                                  return
-                              fi
-                          fi
-                      done
-                  fi
-              done
-          }
-          
-          # 1. Nothing Phone (2a) के लिए गायब ऐप्स को वर्तमान यूजर (User 0) के लिए फिर से रजिस्टर करना
-          ui_print "- Restoring system packages registry..."
-          cmd package install-existing $YT_PKG >/dev/null 2>&1
-          cmd package install-existing $YTM_PKG >/dev/null 2>&1
-          pm enable $YT_PKG >/dev/null 2>&1
-          pm enable $YTM_PKG >/dev/null 2>&1
-          
-          # 2. स्कैन करके स्टॉक यूट्यूब और स्टॉक म्यूजिक फोल्डर का पता लगाना
-          ui_print "- Scanning Nothing OS partitions for YouTube..."
-          YT_DIR=$(find_system_dir "YouTube")
-          
-          ui_print "- Scanning Nothing OS partitions for YouTube Music..."
-          YTM_DIR=$(find_system_dir "YouTubeMusic")
-          if [ -z "$YTM_DIR" ]; then
-              YTM_DIR=$(find_system_dir "Music2")
+          # Systemlessly mount YouTube (ऊपर से पैच)
+          if [ -n "$YT_PATH" ]; then
+              mount -o bind /data/adb/modules/youtube-music-morphe-bundle/youtube.apk "$YT_PATH"
           fi
           
-          # 3. पुराने यूजर अपडेट्स को हटाना ताकि सिग्नेचर एरर न आए
-          ui_print "- Removing conflicting user updates..."
-          pm uninstall $YT_PKG >/dev/null 2>&1
-          pm uninstall $YTM_PKG >/dev/null 2>&1
-          
-          # --- YouTube Installation ---
-          if [ -n "$YT_DIR" ]; then
-              # Pure shell to find original apk name without 'ls' or 'grep'
-              STOCK_FILE=""
-              for file in "$YT_DIR"/*; do
-                  if [[ "$file" == *.apk || "$file" == *.APK ]]; then
-                      STOCK_FILE=$(basename "$file")
-                      break
-                  fi
-              done
-              if [ -z "$STOCK_FILE" ]; then
-                  STOCK_FILE="YouTube.apk"
-              fi
-              
-              ui_print "- Stock YouTube found at: $YT_DIR ($STOCK_FILE)"
-              MOUNT_DIR=$(get_magisk_mount_path "$YT_DIR")
-              mkdir -p "$MOUNT_DIR"
-              cp "$MODPATH/com.google.android.youtube.apk" "$MOUNT_DIR/$STOCK_FILE"
-              chmod 644 "$MOUNT_DIR/$STOCK_FILE"
-          else
-              ui_print "- Stock YouTube not found. Creating fallback system app..."
-              mkdir -p "$MODPATH/system/product/app/YouTube"
-              cp "$MODPATH/com.google.android.youtube.apk" "$MODPATH/system/product/app/YouTube/YouTube.apk"
-              chmod 644 "$MODPATH/system/product/app/YouTube/YouTube.apk"
+          # Systemlessly mount YT Music (ऊपर से पैच)
+          if [ -n "$YTM_PATH" ]; then
+              mount -o bind /data/adb/modules/youtube-music-morphe-bundle/music.apk "$YTM_PATH"
           fi
-          
-          # --- YouTube Music Installation ---
-          if [ -n "$YTM_DIR" ]; then
-              STOCK_FILE=""
-              for file in "$YTM_DIR"/*; do
-                  if [[ "$file" == *.apk || "$file" == *.APK ]]; then
-                      STOCK_FILE=$(basename "$file")
-                      break
-                  fi
-              done
-              if [ -z "$STOCK_FILE" ]; then
-                  STOCK_FILE="YouTubeMusic.apk"
-              fi
-              
-              ui_print "- Stock YT Music found at: $YTM_DIR ($STOCK_FILE)"
-              MOUNT_DIR=$(get_magisk_mount_path "$YTM_DIR")
-              mkdir -p "$MOUNT_DIR"
-              cp "$MODPATH/com.google.android.apps.youtube.music.apk" "$MOUNT_DIR/$STOCK_FILE"
-              chmod 644 "$MOUNT_DIR/$STOCK_FILE"
-          else
-              ui_print "- Stock YT Music not found. Creating fallback system app..."
-              mkdir -p "$MODPATH/system/product/app/YouTubeMusic"
-              cp "$MODPATH/com.google.android.apps.youtube.music.apk" "$MODPATH/system/product/app/YouTubeMusic/YouTubeMusic.apk"
-              chmod 644 "$MODPATH/system/product/app/YouTubeMusic/YouTubeMusic.apk"
-          fi
-          
-          # Clean up temporary APKs from root
-          rm -f "$MODPATH/com.google.android.youtube.apk"
-          rm -f "$MODPATH/com.google.android.apps.youtube.music.apk"
-          ui_print "- Package cleanup complete!"
           EOF
           
           # Create ZIP of the entire bundle
@@ -261,8 +190,8 @@ jobs:
           body: |
             Unified Magisk/KernelSU Module for YouTube & YT Music.
             
-            - Safely uninstalls user-space updates during flash to prevent signature mismatch.
-            - Automatically detects original system paths and preserves identical filenames.
+            - Dynamic bind-mount after boot to prevent package manager signature errors.
+            - Leaves stock apps completely untouched and fully functional upon uninstallation.
             - Default Theme: Pitch Black Theme enabled.
           files: |
             magisk_out/YouTube-Music-Morphe-Bundle.zip
